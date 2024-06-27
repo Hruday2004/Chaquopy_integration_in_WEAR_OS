@@ -6,6 +6,10 @@ import pyPPG.preproc as PP
 import pyPPG.fiducials as FP
 import pyPPG.biomarkers as BM
 from dotmap import DotMap
+from sklearn.svm import SVC
+import numpy as np
+from joblib import dump, load
+import os
 import pyPPG.ppg_sqi as SQI
 from com.chaquo.python import Python
 
@@ -43,8 +47,40 @@ def extract_feature(file_path):
     bm_defs, bm_vals, bm_stats = bmex.get_biomarkers()
 
     bm = Biomarkers(bm_defs=bm_defs, bm_vals=bm_vals, bm_stats=bm_stats)
+    all_stats = []
 
-    return bm
+    for key, df in bm.bm_stats.items():
+        all_stats.append(df)
+
+    all_stats_df = pd.concat(all_stats, axis=1)
+
+    return list(all_stats_df.loc['mean'])
+
+def store_model(writable_dir, original_list):
+    X_train = np.empty((50, 102))
+    for i in range(50):
+        np.random.shuffle(original_list)
+        X_train[i] = original_list.copy()
+
+    Y_train = np.random.randint(2, size=50)
+
+    svm_classifier = SVC(kernel='rbf', random_state=42, probability=True)
+    svm_classifier.fit(X_train, Y_train)
+
+    os.makedirs(writable_dir, exist_ok=True)
+    file_path = os.path.join(writable_dir, 'test.joblib')
+
+    dump(svm_classifier, file_path)
+
+
+def inference(file_path):
+    X_test = np.random.uniform(-10, 10, (1, 102))
+
+    model = load(file_path, mmap_mode='r')
+
+    result = model.predict(X_test)
+
+    return result[0]
 
 def extract_ppg(file_path):
     df = pd.read_csv(file_path)

@@ -24,6 +24,7 @@ class MainActivity : ComponentActivity() {
     var tag = "mainapp"
     private lateinit var SelectFile: TextView
     private lateinit var btnSubmit: Button
+    private lateinit var ppg_bm: PyObject
     private var selectedFileUri: Uri? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -38,27 +39,9 @@ class MainActivity : ComponentActivity() {
         setContentView(R.layout.activity_home)
         Log.d(tag, "home")
 
-        // Initialize Python only once
         if (!Python.isStarted()) {
             Python.start(AndroidPlatform(this))
-            Log.d(tag, "python")
         }
-        val py = Python.getInstance()
-        Log.d(tag, "py3")
-        val module = py.getModule("preprocessing")
-
-        // Preprocess CSV file (only needed to be done once)
-        val assetManager = assets
-        val inputStream = assetManager.open("fasting1.csv")
-        val tempFile = File(cacheDir, "fasting1.csv")
-        inputStream.use { input ->
-            tempFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        val ppg_bm: PyObject = module.callAttr("extract_feature", tempFile.path)
-        Log.d(tag, ppg_bm.toString())
-        Log.d(tag, "py5")
 
         SelectFile = findViewById(R.id.tv_select_file)
         btnSubmit = findViewById(R.id.btn_submit)
@@ -104,13 +87,19 @@ class MainActivity : ComponentActivity() {
         // Set the animation drawable as the background of the ImageView
         imageView.background = animationDrawable
 
-        // Start the animation
-        imageView.post { animationDrawable.start() }
+        // Start the animation on the UI thread to ensure it runs smoothly
+        imageView.post {
+            animationDrawable.setEnterFadeDuration(500)
+            animationDrawable.setExitFadeDuration(500)
+            animationDrawable.start()
+        }
     }
+
 
     private fun showResultScreen(result: String) {
         setContentView(R.layout.activity_result)
         findViewById<TextView>(R.id.tv_result).text = result
+
         findViewById<Button>(R.id.btn_back).setOnClickListener {
             setUpHomeScreen()
         }
@@ -118,11 +107,40 @@ class MainActivity : ComponentActivity() {
 
     private fun runMLAlgorithm(onResult: (String) -> Unit) {
         scope.launch {
-            delay(5000) // Simulating a long-running task
-            val isHydrated = (0..1).random() == 0
-            onResult(if (isHydrated) "Hydrated" else "Dehydrated")
+            withContext(Dispatchers.IO) {
+                val file = File(cacheDir, "test.joblib")
+
+                val py = Python.getInstance()
+                val module = py.getModule("preprocessing")
+
+                val assetManager = assets
+                val inputStream = assetManager.open("fasting1.csv")
+                val tempFile = File(cacheDir, "fasting1.csv")
+                inputStream.use { input ->
+                    tempFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val writableDir = cacheDir.absolutePath
+
+                ppg_bm = module.callAttr("extract_feature", tempFile.path)
+                module.callAttr("store_model", writableDir, ppg_bm)
+
+                Log.d(tag, ppg_bm.toString())
+                Log.d(tag, "py5")
+
+                val isHydrated = module.callAttr("inference", file.absolutePath).toString()
+
+                Log.d(tag, isHydrated)
+
+                // Return the result on the main thread
+                withContext(Dispatchers.Main) {
+                    onResult(if (isHydrated == "1") "Hydrated" else "Dehydrated")
+                }
+            }
         }
     }
+
 
     override fun onDestroy() {
         super.onDestroy()
